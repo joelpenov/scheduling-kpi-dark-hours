@@ -1,0 +1,54 @@
+A weekly scheduling KPI report disagrees with the scheduling screen. Dark/uncovered hours are incorrect in a legacy ASP.NET Web Forms/C#/SQL Server system. Diagnose and fix the intentionally buggy C# below.
+
+
+BUSINESS RULES:
+1. Intervals are [Start,End); adjacent intervals do not overlap.
+2. Removed shifts are excluded from active scheduled hours but remain auditable.
+3. Scheduled hours = union of active shift intervals clipped to the reporting window, not sum of overlaps.
+4. Covered hours = union of coverage intervals clipped to active scheduled intervals and reporting window; duplicates must not double-count.
+5. Dark hours = scheduled minus covered, never negative.
+6. Window [2026-10-12 00:00,2026-10-19 00:00); timestamps same local timezone, ignore DST for calculations but describe production handling.
+7. Preserve minute precision, display hours to 2 decimals.
+
+
+
+STARTER C#:
+using System;
+using System.Collections.Generic;
+using System.Linq;
+public record Shift(int Id, string Location, DateTime Start, DateTime End, bool Removed);
+public record Coverage(int Id, string Location, DateTime Start, DateTime End);
+public static class WeeklyKpi {
+public static (double scheduled,double covered,double dark) Calculate(
+string location,DateTime from,DateTime to,
+IEnumerable<Shift> shifts,IEnumerable<Coverage> coverage) {
+var scheduled=shifts.Where(s=>s.Location==location && s.Start>=from && s.End<=to)
+.Sum(s=>(s.End-s.Start).TotalHours);
+var covered=coverage.Where(c=>c.Location==location && c.Start>=from && c.End<=to)
+.Sum(c=>(c.End-c.Start).TotalHours);
+return (scheduled,covered,scheduled-covered);
+}
+}
+
+
+
+SYNTHETIC SQL FIXTURE (SQL Server):
+CREATE TABLE #Shifts (Id INT, Location VARCHAR(30), StartAt DATETIME2, EndAt DATETIME2, Removed BIT);
+CREATE TABLE #Coverage (Id INT, Location VARCHAR(30), StartAt DATETIME2, EndAt DATETIME2);
+INSERT INTO #Shifts VALUES
+(1,'Wichita','2026-10-12T08:00','2026-10-12T16:00',0),
+(2,'Wichita','2026-10-12T12:00','2026-10-12T20:00',0),
+(3,'Wichita','2026-10-13T09:00','2026-10-13T17:00',1),
+(4,'Wichita','2026-10-14T22:00','2026-10-15T06:00',0),
+(5,'Memphis','2026-10-11T22:00','2026-10-12T04:00',0),
+(6,'Memphis','2026-10-18T20:00','2026-10-19T04:00',0),
+(7,'Memphis','2026-10-16T08:00','2026-10-16T12:00',0);
+INSERT INTO #Coverage VALUES
+(101,'Wichita','2026-10-12T08:00','2026-10-12T13:00'),
+(102,'Wichita','2026-10-12T12:00','2026-10-12T15:00'),
+(103,'Wichita','2026-10-12T18:00','2026-10-12T20:00'),
+(104,'Wichita','2026-10-14T23:00','2026-10-15T03:00'),
+(105,'Memphis','2026-10-11T23:00','2026-10-12T02:00'),
+(106,'Memphis','2026-10-18T21:00','2026-10-19T02:00'),
+(107,'Memphis','2026-10-16T07:00','2026-10-16T09:00');
+

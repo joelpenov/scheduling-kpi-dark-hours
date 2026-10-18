@@ -1,0 +1,144 @@
+## .NET 10 default .gitignore
+
+# Build results
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Ll]og/
+[Ll]ogs/
+out/
+artifacts/
+publish/
+PublishProfiles/
+*.publishsettings
+TestResults/
+[Tt]est[Rr]esult*/
+BenchmarkDotNet.Artifacts/
+
+# Visual Studio / Rider / VS Code
+.vs/
+.vscode/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.rsuser
+*.DotSettings.user
+*.swp
+*~
+
+# NuGet
+*.nupkg
+*.snupkg
+**/[Pp]ackages/*
+!**/[Pp]ackages/build/
+project.lock.json
+project.fragment.lock.json
+.nuget/
+
+# Build / tooling output
+*.dll
+*.exe
+*.pdb
+*.cache
+*.ilk
+*.obj
+*.iobj
+*.ipdb
+*.log
+*.tlog
+*.vspscc
+*.vssscc
+*.pidb
+*.svclog
+*.scc
+*.binlog
+*.nuget.props
+*.nuget.targets
+*.nuget.dgspec.json
+msbuild.binlog
+.sass-cache/
+
+# Coverage / profiling
+*.coverage
+*.coveragexml
+*.dotCover
+coverage/
+coverage*.json
+coverage*.xml
+coverage*.info
+*.psess
+*.vsp
+*.vspx
+*.sap
+
+# Secrets and local config
+appsettings.*.local.json
+appsettings.Local.json
+secrets.json
+*.pfx
+*.snk
+.env
+.env.*
+!.env.example
+launchSettings.local.json
+
+# Entity Framework / databases
+*.mdf
+*.ldf
+*.ndf
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Aspire / Docker / local tooling
+.aspire/
+.containers/
+*.dcproj.user
+
+# Node (for ASP.NET front-ends)
+node_modules/
+wwwroot/dist/
+wwwroot/lib/
+npm-debug.log*
+yarn-error.log*
+
+# Local history & misc
+.localhistory/
+.history/
+*.bak
+*.orig
+*.tmp
+.mfractor/
+.ionide/
+ClientBin/
+Generated\ Files/
+*.GhostDoc.xml
+_ReSharper*/
+*.[Rr]e[Ss]harper
+_TeamCity*
+_NCrunch_*
+*.ncrunch*
+*.crunchsolution.cache
+
+# macOS / Windows / Linux
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
