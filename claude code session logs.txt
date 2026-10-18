@@ -1,0 +1,563 @@
+add a default .gitignore for a .net 10 project
+
+I'll check the repo for an existing .gitignore, then write a standard .NET one.
+
+  Ran 1 shell command
+
+⏺ Bash(cat > .gitignore <<'EOF'
+      ## .NET 10 default .gitignore…)
+?? .gitignore
+?? Instructions.txt
+Created .gitignore (+144 -0)
+## .NET 10 default .gitignore
+
+# Build results
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Ll]og/
+[Ll]ogs/
+out/
+artifacts/
+publish/
+PublishProfiles/
+*.publishsettings
+TestResults/
+[Tt]est[Rr]esult*/
+BenchmarkDotNet.Artifacts/
+
+# Visual Studio / Rider / VS Code
+.vs/
+.vscode/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.rsuser
+*.DotSettings.user
+*.swp
+*~
+
+# NuGet
+*.nupkg
+… 104 more lines
+(files that changed while this command ran, by the command or by another process; a convenience view, not a review or audit of the command)
+
+Added .gitignore at the repo root. It covers the standard .NET build and tooling noise:
+
+- Build output: bin, obj, artifacts, publish, TestResults, BenchmarkDotNet artifacts, binlogs.
+- IDE files: .vs, .vscode, .idea, Rider and ReSharper caches, user-specific solution settings.
+- NuGet: package folders and lock fragments, while keeping any packages/build folder.
+- Secrets and local config: .env files, user secrets, appsettings local overrides, .pfx and .snk keys.
+- Local databases: SQLite and SQL Server LocalDB files.
+- Aspire, Docker, Node: .aspire, node_modules, wwwroot dist and lib folders.
+- OS clutter: .DS_Store, Thumbs.db, and similar.
+
+The stray .DS_Store in the repo is now ignored, so git status only shows the new .gitignore and Instructions.txt as untracked. Nothing was committed.
+
+✻ Cogitated for 26s · done 9:53 PM
+
+❯ read @Instructions.txt  this is a production bug, the weekly scheduling KPI report is showing different dark (uncovered) hours than the scheduling screen. dont write or change any code yet, i want to understand it first.
+
+  1. check WeeklyKpi.Calculate against the business rules 1-7. for every defect you find tell me: which rule it breaks, the exact expresion that is wrong,one fixture row (by Id) that triggers it, and the operational impact for the scheduling and payroll team in one sentence.
+  2. then calculate BY HAND, minute precision, the expected scheduled, covered and dark hours per location for the window [2026-10-12 00:00, 2026-10-19 00:00) and the grand total. show me the clipped interval you used for each row of the fixture, i want to see the work not only the result.
+  3. also calculate what the current code returns with the same fixture.
+
+  stop there, i will verify the numbers before we touch anything.
+Read Instructions.txt (55 lines)
+
+Read Instructions.txt. Analysis only, no code changes.
+
+1. Defects in WeeklyKpi.Calculate
+
+┌─────┬────────────────────────┬──────────────────────────────────────────────────────────────┬───────────────────────────────────────────────────┬───────────────────────────────────────────────────────────┐
+│  #  │      Rule broken       │                       Wrong expression                       │                    Trigger row                    │                    Operational impact                     │
+├─────┼────────────────────────┼──────────────────────────────────────────────────────────────┼───────────────────────────────────────────────────┼───────────────────────────────────────────────────────────┤
+│     │ Rule 2 (removed shifts │ shifts.Where(s=>s.Location==location && ...) has no          │                                                   │ Wichita reports 8 phantom scheduled hours that nobody is  │
+│ D1  │  excluded)             │ !s.Removed filter                                            │ Shift 3                                           │ expected to work, so the dark total and any payroll       │
+│     │                        │                                                              │                                                   │ forecast built from it are inflated.                      │
+├─────┼────────────────────────┼──────────────────────────────────────────────────────────────┼───────────────────────────────────────────────────┼───────────────────────────────────────────────────────────┤
+│     │                        │                                                              │                                                   │ Overnight shifts at the start and end of the week vanish  │
+│ D2  │ Rule 3 / Rule 6 (clip  │ s.Start>=from && s.End<=to drops any shift that straddles    │ Shift 5 (also 6)                                  │ from the report entirely, so Memphis under-reports        │
+│     │ to window)             │ the window edge instead of clipping it                       │                                                   │ scheduled hours and the scheduling team sees fewer dark   │
+│     │                        │                                                              │                                                   │ hours than really exist.                                  │
+├─────┼────────────────────────┼──────────────────────────────────────────────────────────────┼───────────────────────────────────────────────────┼───────────────────────────────────────────────────────────┤
+│     │ Rule 3 (union, not     │                                                              │                                                   │ Overlapping shifts are double counted, so the report      │
+│ D3  │ sum)                   │ .Sum(s=>(s.End-s.Start).TotalHours) adds raw durations       │ Shift 2 (overlaps shift 1 for 12:00–16:00)        │ claims more scheduled hours than the screen shows and     │
+│     │                        │                                                              │                                                   │ dark hours are overstated.                                │
+├─────┼────────────────────────┼──────────────────────────────────────────────────────────────┼───────────────────────────────────────────────────┼───────────────────────────────────────────────────────────┤
+│     │ Rule 4 (coverage       │ .Sum(c=>(c.End-c.Start).TotalHours) adds raw coverage        │                                                   │ The same covered hour is paid for or credited twice,      │
+│ D4  │ union, no double       │ durations                                                    │ Coverage 102 (overlaps 101 for 12:00–13:00)       │ hiding real gaps when two coverers overlap.               │
+│     │ counting)              │                                                              │                                                   │                                                           │
+├─────┼────────────────────────┼──────────────────────────────────────────────────────────────┼───────────────────────────────────────────────────┼───────────────────────────────────────────────────────────┤
+│     │ Rule 4 (clip coverage  │ Coverage is never intersected with the shift intervals;      │ Coverage 107 (1 h before shift 7 starts); 105 and │ Coverage outside any shift counts as covering something,  │
+│ D5  │ to active scheduled    │ c.Start>=from && c.End<=to also drops straddling coverage    │  106 are dropped                                  │ and boundary coverage disappears, so covered hours are    │
+│     │ intervals and window)  │ instead of clipping                                          │                                                   │ wrong in both directions and dark hours are unreliable.   │
+├─────┼────────────────────────┼──────────────────────────────────────────────────────────────┼───────────────────────────────────────────────────┼───────────────────────────────────────────────────────────┤
+│     │                        │                                                              │ None in this fixture produces a negative; 107 is  │                                                           │
+│ D6  │ Rule 5 (dark never     │ scheduled-covered with no floor at zero                      │ the closest, since its hour outside shift 7 lets  │ A negative dark figure would be summed into the grand     │
+│     │ negative)              │                                                              │ covered exceed scheduled whenever a shift is      │ total and silently offset real gaps at other locations.   │
+│     │                        │                                                              │ short or removed                                  │                                                           │
+└─────┴────────────────────────┴──────────────────────────────────────────────────────────────┴───────────────────────────────────────────────────┴───────────────────────────────────────────────────────────┘
+
+Rule 7 is satisfied inside the method. TotalHours keeps minute precision as a double. The 2-decimal display belongs to the report layer.
+
+Rule 1 has no separate defect in this fixture. Because the code never computes a union, adjacency is simply never examined. The End<=to comparison is consistent with half-open intervals.
+
+DST note for rule 6. The window has no transition. US DST ends 2026-11-01. In production, the safe handling is to store DATETIMEOFFSET or UTC, compute in UTC, and convert for display, so a fall-back night shift reports 9 real hours rather than 8 wall-clock hours.
+
+2. Expected values by hand
+
+Window W = [2026-10-12 00:00, 2026-10-19 00:00).
+
+Wichita shifts
+
+┌─────┬───────────────────────────┬─────────┬───────────────────────────┬─────────┐
+│ Id  │       Raw interval        │ Active? │       Clipped to W        │ Minutes │
+├─────┼───────────────────────────┼─────────┼───────────────────────────┼─────────┤
+│ 1   │ 10-12 08:00 – 16:00       │ yes     │ 10-12 08:00 – 16:00       │ 480     │
+├─────┼───────────────────────────┼─────────┼───────────────────────────┼─────────┤
+│ 2   │ 10-12 12:00 – 20:00       │ yes     │ 10-12 12:00 – 20:00       │ 480     │
+├─────┼───────────────────────────┼─────────┼───────────────────────────┼─────────┤
+│ 3   │ 10-13 09:00 – 17:00       │ removed │ excluded (audit only)     │ 0       │
+├─────┼───────────────────────────┼─────────┼───────────────────────────┼─────────┤
+│ 4   │ 10-14 22:00 – 10-15 06:00 │ yes     │ 10-14 22:00 – 10-15 06:00 │ 480     │
+└─────┴───────────────────────────┴─────────┴───────────────────────────┴─────────┘
+
+Union: 1 and 2 merge into 10-12 08:00 – 20:00 (720 min). Shift 4 stands alone (480 min).
+Scheduled = 1200 min = 20.00 h.
+
+Wichita coverage, clipped to W then to the scheduled union
+
+┌─────┬───────────────────────────┬───────────────────────────┬─────────┐
+│ Id  │       Raw interval        │          Clipped          │ Minutes │
+├─────┼───────────────────────────┼───────────────────────────┼─────────┤
+│ 101 │ 10-12 08:00 – 13:00       │ 10-12 08:00 – 13:00       │ 300     │
+├─────┼───────────────────────────┼──────
+├─────┼───────────────────────────┼───────────────────────────┼─────────┤
+│ 104 │ 10-14 23:00 – 10-15 03:00 │ 10-14 23:00 – 10-15 03:00 │ 240     │
+└─────┴───────────────────────────┴───────────────────────────┴─────────┘
+
+Union: 101 and 102 merge into 08:00 – 15:00 (420 min). 103 is 120 min. 104 is 240 min.
+Covered = 780 min = 13.00 h.
+Dark = 1200 − 780 = 420 min = 7.00 h. Cross-check by gaps: 15:00–18:00 (180), 22:00–23:00 (60), 03:00–06:00 (180) = 420.
+
+Memphis shifts
+
+┌─────┬───────────────────────────┬─────────┬───────────────────────────┬─────────┐
+│ Id  │       Raw interval        │ Active? │       Clipped to W        │ Minutes │
+├─────┼───────────────────────────┼─────────┼───────────────────────────┼─────────┤
+│ 5   │ 10-11 22:00 – 10-12 04:00 │ yes     │ 10-12 00:00 – 04:00       │ 240     │
+├─────┼───────────────────────────┼─────────┼───────────────────────────┼─────────┤
+│ 6   │ 10-18 20:00 – 10-19 04:00 │ yes     │ 10-18 20:00 – 10-19 00:00 │ 240     │
+├─────┼───────────────────────────┼─────────┼───────────────────────────┼─────────┤
+│ 7   │ 10-16 08:00 – 12:00       │ yes     │ 10-16 08:00 – 12:00       │ 240     │
+└─────┴───────────────────────────┴─────────┴───────────────────────────┴─────────┘
+
+No overlaps. Scheduled = 720 min = 12.00 h.
+
+Memphis coverage
+
+┌─────┬───────────────────────────┬───────────────────────────┬─────────────────────┬─────────┐
+│ Id  │       Raw interval        │       Clipped to W        │  Clipped to shift   │ Minutes │
+├─────┼───────────────────────────┼───────────────────────────┼─────────────────────┼─────────┤
+│ 105 │ 10-11 23:00 – 10-12 02:00 │ 10-12 00:00 – 02:00       │ 10-12 00:00 – 02:00 │ 120     │
+├─────┼───────────────────────────┼───────────────────────────┼─────────────────────┼─────────┤
+│ 106 │ 10-18 21:00 – 10-19 02:00 │ 10-18 21:00 – 10-19 00:00 │ same                │ 180     │
+├─────┼───────────────────────────┼───────────────────────────┼─────────────────────┼─────────┤
+│ 107 │ 10-16 07:00 – 09:00       │ 10-16 07:00 – 09:00       │ 10-16 08:00 – 09:00 │ 60      │
+└─────┴───────────────────────────┴───────────────────────────┴─────────────────────┴─────────┘
+
+Covered = 360 min = 6.00 h.
+Dark = 720 − 360 = 360 min = 6.00 h. Gaps: 02:00–04:00 (120), 09:00–12:00 (180), 20:00–21:00 (60) = 360.
+
+Expected totals
+
+┌─────────────┬───────────┬─────────┬───────┐
+│  Location   │ Scheduled │ Covered │ Dark  │
+├─────────────┼───────────┼─────────┼───────┤
+│ Wichita     │ 20.00     │ 13.00   │ 7.00  │
+├─────────────┼───────────┼─────────┼───────┤
+│ Memphis     │ 12.00     │ 6.00    │ 6.00  │
+├─────────────┼───────────┼─────────┼───────┤
+│ Grand total │ 32.00     │ 19.00   │ 13.00 │
+└─────────────┴───────────┴─────────┴───────┘
+
+3. What the current code returns
+
+Wichita: shifts 1, 2, 3, 4 all pass the filter, including the removed shift 3, and are summed raw. Coverage 101 to 104 all pass and are summed raw.
+Memphis: shift 5 fails because its start is before the window, shift 6 fails because its end is after the window. Only shift 7 survives. Coverage 105 and 106 fail the same way, so only 107 survives, and it is not clipped to shift 7.
+
+┌─────────────┬───────────┬─────────┬───────┬─────────────────────────────────┐
+│  Location   │ Scheduled │ Covered │ Dar
+│ Memphis     │ 4.00      │ 2.00    │ 2.00  │ shift 7 only; coverage 107 only │
+├─────────────┼───────────┼─────────┼───────┼─────────────────────────────────┤
+│ Grand total │ 36.00     │ 16.00   │ 20.00 │                                 │
+└─────────────┴───────────┴─────────┴───────┴─────────────────────────────────┘
+
+Against expected, the code overstates the grand total dark hours by 7 and gets both locations wrong in opposite directions. Wichita is too high because of D1, D3, and D4. Memphis is too low because of D2 and D5.
+
+Stopping here as asked. No files were changed.
+
+✻ Churned for 1m 7s · done 9:58 PM
+
+❯ a colleague reviewed this and doesnt agree with you in two points:
+  a) Memphis scheduled should be 4.00 because shifts 5 and 6 start or end outside the reporting window, so the current filter is correct excluding them
+  b) coverage 107 should count 2.00 hours because the coverage record exist and somebody was on site
+
+  argue each point against rules 3, 4 and 6 and tell me who is right. dont change your answer just to agree with me, if you were wrong say it and show me the corrected row
+
+I stand by both rows. Here is the argument for each, against the rules as written.
+
+Point a: Memphis scheduled should be 4.00 because shifts 5 and 6 cross the window edge.
+
+Rule 3 says scheduled hours are the union of active shift intervals clipped to the reporting window. "Clipped" means the part outside the window is cut off and the part inside is kept. If the rule intended straddling shifts to be excluded, it would say "contained in" or "fully within" the window, not "clipped to". The word only has meaning if partial shifts survive.
+
+Rule 6 defines the window as a half-open range, [10-12 00:00, 10-19 00:00). It describes a time range to measure, not a membership test on shift records. Shift 5 has 4 real hours inside that range, from 00:00 to 04:00 on 10-12. Shift 6 has 4 real hours inside it, from 20:00 on 10-18 to 00:00 on 10-19. Those hours were scheduled, they fall inside the week, and someone either worked them or they went dark.
+
+The operational test settles it. Under the colleague's reading, every overnight shift that crosses Sunday midnight disappears from both the week it starts in and the week it ends in, so it is never reported anywhere. That is exactly the kind of gap the scheduling screen would show and the KPI would miss, which is the production bug you are chasing. Clipping also makes weeks sum correctly: the 2 hours of shift 5 on 10-11 belong to the prior week, the 4 hours on 10-12 to this one, and nothing is lost or counted twice.
+
+Memphis scheduled stays at 12.00. Rows for 5 and 6 stay as I gave them: 240 minutes each after clipping.
+
+Point b: Coverage 107 should count 2.00 hours because somebody was on site.
+
+Rule 4 says covered hours are the union of coverage intervals clipped to active scheduled intervals and the reporting window. Coverage is only meaningful as coverage of something scheduled. From 07:00 to 08:00 on 10-16 there is no active Memphis shift, so there is nothing for that hour to cover.
+
+Rule 5 shows why the rule is written that way. Dark is scheduled minus covered and must never go negative. If coverage outside any shift counted, a short shift with a long coverer would produce covered greater than scheduled, and the only way to keep dark non-negative would be an arbitrary floor that hides real gaps elsewhere. Clipping coverage to the scheduled intervals is what makes the subtraction honest.
+
+The colleague's point that the person was on site is true, and the record does exist. That is an audit or payroll fact, and the record should stay in the table untouched. The KPI question is different. The KPI asks how many scheduled hours were covered, and from 07:00 to 08:00 the answer is zero because none were scheduled. The report and the screen can both show that extra hour as unscheduled presence if the business wants it, but it cannot reduce dark hours.
+
+Coverage 107 stays at 60 minutes, clipped to 10-16 08:00 to 09:00. Memphis covered stays at 6.00 and dark at 6.00.
+
+Who is right. The rules support my numbers on both points. The colleague is reading the current filter as the specification, but the current filter is what rule 3 and rule 4 say is wrong. My totals are unchanged: Wichita 20.00 / 13.00 / 7.00, Memphis 12.00 / 6.00 / 6.00, grand total 32.00 / 19.00 / 13.00.
+
+One caveat worth raising with the colleague: if the business actually wants whole-shift attribution, meaning a shift counts entirely in the week it starts, that is a legitimate design choice. But it is not what rules 3 and 6 say, and it would require changing the rules first, not the code.
+
+✻ Crunched for 19s · done 10:01 PM
+
+※ recap: Diagnosing why the weekly KPI dark-hours report disagrees with the scheduling screen, analysis only so far. Defects, hand-calculated expected totals (32/19/13), and current-code totals (36/16/20) are ready for your verification before any code changes. (disable recaps in /config)
+
+❯ ok numbers are good, lets fix it. i want the smallest safe change, not a rewrite.
+
+  - create a solution with src/WeeklyKpi (net 10 class library) and tests/WeeklyKpi.Tests (xunit). keep the Shift/Coverage records and the Calculate signature exactly like in Instructions.txt, the callers dont change.
+  - put the interval logic in an internal static IntervalMath class:
+    Clip(start,end,from,to) that returns null if nothing is left, Merge(IEnumerable<(DateTime,DateTime)>) that returns a sorted list without overlaps, Intersect(mergedA, mergedB) and TotalMinutes(merged) returning long.
+  - pipeline: filter by location and !Removed -> clip to [from,to) -> drop empty or inverted -> sort by Start -> one pass sweep merge.
+  - covered = Merge(Intersect(Merge(coverage clipped to window), scheduled))
+  - acumulate whole minutes as long, convert to hours only at the end.
+    dark = Math.Max(0, scheduled - covered). the rounding to 2 decimals is for the caller/display, not here.
+  - touching intervals like [08,12)+[12,16) are adjacent, not overlap.
+  - one line comment above each decision with the rule number, nothing more. no new dependencies.
+
+  before writing code give me 5-8 lines with the edge cases you will handle and how (zero length, Start>=End, coverage outside any shift, coverage spanning two separated shifts, interval fully outside the window, Location casing).
+
+  then write the code and this xunit tests, name them Rule<N>_<Scenario>_<Expected>:
+  1. rule3 overlap: 08-16 + 12-20 -> scheduled 12.00 not 16.00
+  2. rule2 removed shift gives 0 but is still in the input
+  3. rule4 duplicated coverage rows counted once
+  4. rule6 window clipping: 22:00-06:00 crossing the window start -> 4.00
+  5. rule4 coverage 07-09 vs shift 08-12 -> covered 1.00
+  6. rule5 coverage bigger than scheduled -> dark 0.00, never negative
+  7. rule1 touching intervals [08,12)+[12,16) -> 8.00
+  8. rule7 minute precision: 08:00-08:45 -> 0.75
+  9. golden: the full fixture from Instructions.txt -> per location and total, print the three numbers per location in the test output as a table with 2 decimals.
+
+  run dotnet test and show me the full output.
+
+I'll check the .NET SDK, then lay out the edge cases, build the solution, and run the tests.
+
+  Ran 1 shell command
+
+I've worked through the edge cases (zero-length/inverted intervals, out-of-window coverage, gaps between shifts, half-open boundary rules, touching intervals, and sub-minute truncation) confirming each is handled correctly without special-casing. Now I'll move on to implementing the solution. · summary
+
+⏺ Bash(mkdir -p src/WeeklyKpi tests/WeeklyKpi.Tests && dotnet new sln -n SchedulingKpi -o . --force >/dev/null && dotnet new classlib -n WeeklyKpi -o src/WeeklyKpi -f…)
+Project `src/WeeklyKpi/WeeklyKpi.csproj` added to the solution.
+Project `tests/WeeklyKpi.Tests/WeeklyKpi.Tests.csproj` added to the solution.
+Reference `..\..\src\WeeklyKpi\WeeklyKpi.csproj` added to the project.
+… +29 lines
+Created SchedulingKpi.slnx (+8 -0)
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/WeeklyKpi/WeeklyKpi.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/WeeklyKpi.Tests/WeeklyKpi.Tests.csproj" />
+  </Folder>
+</Solution>
+Created src/WeeklyKpi/WeeklyKpi.csproj (+9 -0)
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>
+Created tests/WeeklyKpi.Tests/WeeklyKpi.Tests.csproj (+25 -0)
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.4" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\WeeklyKpi\WeeklyKpi.csproj" />
+  </ItemGroup>
+
+</Project>
+
+Now the library code and tests.
+
+  Read 1 file
+
+The issue is in my fixture, not the library—shift 5 (22:00–04:00) is the correct row yielding 4.00, not 22:00–06:00 as originally spec'd. I'll use that fixture going forward. · summary
+
+⏺ Bash(sed -i '' 's|new Shift(5, "Memphis", D("2026-10-11T22:00"), D("2026-10-12T06:00"), false) };|new Shift(5, "Memphis", D("2026-10-11T22:00"), D("2026-10-12T04:00"…)
+58:        var shifts = new[] { new Shift(5, "Memphis", D("2026-10-11T22:00"), D("2026-10-12T04:00"), false) };
+114:            new Shift(5, "Memphis", D("2026-10-11T22:00"), D("2026-10-12T04:00"), false),
+  Determining projects to restore...
+… +32 lines
+Updated tests/WeeklyKpi.Tests/WeeklyKpiTests.cs (+1 -1)
+    [Fact]
+    public void Rule6_ShiftCrossingWindowStart_ClippedToFour()
+    {
+        var shifts = new[] { new Shift(5, "Memphis", D("2026-10-11T22:00"), D("2026-10-12T06:00"), false) };
+        var shifts = new[] { new Shift(5, "Memphis", D("2026-10-11T22:00"), D("2026-10-12T04:00"), false) };
+        var r = Calc(shifts, Array.Empty<Coverage>(), "Memphis");
+        Assert.Equal(4.00, r.scheduled, 2);
+    }
+
+All 9 tests pass. The golden test matches the hand calculation from earlier.
+
+Files created
+
+- SchedulingKpi.slnx at the repo root, with both projects added.
+- src/WeeklyKpi/WeeklyKpi.cs holds the Shift and Coverage records, the unchanged Calculate signature, and the internal IntervalMath class with Clip, Merge, Intersect and TotalMinutes.
+- tests/WeeklyKpi.Tests/WeeklyKpiTests.cs holds the 9 tests, named Rule<N><Scenario><Expected> plus the golden one.
+
+Full test output
+
+Test run for tests/WeeklyKpi.Tests/bin/Debug/net10.0/WeeklyKpi.Tests.dll (.NETCoreApp,Version=v10.0)
+[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v3.1.4+50e68bbb8b (64-bit .NET 10.0.9)
+[xUnit.net 00:00:00.03]   Discovering: WeeklyKpi.Tests
+[xUnit.net 00:00:00.04]   Discovered:  WeeklyKpi.Tests
+[xUnit.net 00:00:00.05]   Starting:    WeeklyKpi.Tests
+[xUnit.net 00:00:00.07]   Finished:    WeeklyKpi.Tests
+  Passed WeeklyKpiTests.Rule3_OverlappingShifts_UnionNotSum [6 ms]
+  Passed WeeklyKpiTests.Rule2_RemovedShiftInInput_ContributesZero [< 1 ms]
+  Passed WeeklyKpiTests.Rule6_ShiftCrossingWindowStart_ClippedToFour [< 1 ms]
+  Passed WeeklyKpiTests.Rule4_DuplicateCoverageRows_CountedOnce [< 1 ms]
+  Passed WeeklyKpiTests.Rule4_CoverageOutsideShift_ClippedToShift [< 1 ms]
+  Passed WeeklyKpiTests.Golden_FullFixture_PerLocationAndTotal [< 1 ms]
+  Standard Output Messages:
+ Location     Scheduled   Covered      Dark
+ Wichita          20.00     13.00      7.00
+ Memphis          12.00      6.00      6.00
+ Total            32.00     19.00     13.00
+
+  Passed WeeklyKpiTests.Rule5_CoverageLargerThanScheduled_DarkIsZeroNeverNegative [< 1 ms]
+  Passed WeeklyKpiTests.Rule7_MinutePrecision_FortyFiveMinutesIsPointSevenFive [< 1 ms]
+  Passed WeeklyKpiTests.Rule1_TouchingIntervals_AdjacentNotOverlapping [< 1 ms]
+
+Test Run Successful.
+Total tests: 9
+     Passed: 9
+ Total time: 0.3382 Seconds
+
+One thing to flag. The first run had one failure in the rule 6 test, caused by my test data, not the library. Your spec listed the shift as 22:00 to 06:00 with an expected 4.00, but a shift ending at 06:00 has 6 hours inside a window that starts at midnight. Fixture shift 5 runs 22:00 to 04:00 and is the row that gives 4.00, so the test now uses that row. If you meant a different window edge, say so and I'll adjust the test.
+
+Decisions worth knowing
+
+- Location matching stays ordinal and case-sensitive, exactly as the original filter, so callers see no behaviour change. If the production data mixes casing, that is a separate change.
+- Sub-minute ticks truncate to whole minutes. The fixture has no seconds, so nothing is affected today.
+- The template pulled in coverlet.collect
+        IEnumerable<Shift> shifts, IEnumerable<Coverage> coverage)
+    {
+        // Rule 2: removed shifts are excluded from scheduled hours but stay in the input for audit.
+        // Rule 3 + Rule 6: clip each active shift to [from,to) and merge overlaps instead of summing.
+        var scheduled = IntervalMath.Merge(
+            shifts.Where(s => s.Location == location && !s.Removed)
+                  .Select(s => IntervalMath.Clip(s.Start, s.End, from, to))
+                  .Where(i => i.HasValue)
+                  .Select(i => i!.Value));
+
+        // Rule 4: coverage is clipped to the window, merged, then clipped to scheduled so duplicates count once.
+        var covered = IntervalMath.Merge(IntervalMath.Intersect(
+            IntervalMath.Merge(
+                coverage.Where(c => c.Location == location)
+                        .Select(c => IntervalMath.Clip(c.Start, c.End, from, to))
+                        .Where(i => i.HasValue)
+                        .Select(i => i!.Value)),
+            scheduled));
+
+        // Rule 7: whole minutes as long, converted to hours only here; 2-decimal display is the caller's job.
+        long scheduledMin = IntervalMath.TotalMinutes(scheduled);
+        long coveredMin = IntervalMath.TotalMinutes(covered);
+
+        // Rule 5: dark = scheduled - covered, floored at zero.
+        long darkMin = Math.Max(0, scheduledMin - coveredMin);
+
+        return (scheduledMin / 60.0, coveredMin / 60.0, darkMin / 60.0);
+        var scheduled=shifts.Where(s=>s.Location==location && s.Start>=from && s.End<=to)
+        .Sum(s=>(s.End-s.Start).TotalHours);
+        var covered=coverage.Where(c=>c.Location==location && c.Start>=from && c.End<=to)
+        .Sum(c=>(c.End-c.Start).TotalHours);
+        return (scheduled,covered,scheduled-covered);
+    }
+Updated src/WeeklyKpi/WeeklyKpi.cs (+25 -5)
+        string location, DateTime from, DateTime to,
+        IEnumerable<Shift> shifts, IEnumerable<Coverage> coverage)
+    {
+        var scheduled=shifts.Where(s=>s.Location==location && s.Start>=from && s.End<=to)
+        .Sum(s=>(s.End-s.Start).TotalHours);
+        var covered=coverage.Where(c=>c.Location==location && c.Start>=from && c.End<=to)
+        .Sum(c=>(c.End-c.Start).TotalHours);
+        return (scheduled,covered,scheduled-covered);
+        // Rule 2: removed shifts are excluded from scheduled hours but stay in the input for audit.
+        // Rule 3 + Rule 6: clip each active shift to [from,to) and merge overlaps instead of summing.
+        var scheduled = IntervalMath.Merge(
+            shifts.Where(s => s.Location == location && !s.Removed)
+                  .Select(s => IntervalMath.Clip(s.Start, s.End, from, to))
+                  .Where(i => i.HasValue)
+                  .Select(i => i!.Value));
+
+        // Rule 4: coverage is clipped to the window, merged, then clipped to scheduled so duplicates count once.
+        var covered = IntervalMath.Merge(IntervalMath.Intersect(
+            IntervalMath.Merge(
+                coverage.Where(c => c.Location == location)
+                        .Select(c => IntervalMath.Clip(c.Start, c.End, from, to))
+                        .Where(i => i.HasValue)
+                        .Select(i => i!.Value)),
+            scheduled));
+
+        // Rule 7: whole minutes as long, converted to hours only here; 2-decimal display is the caller's job.
+        long scheduledMin = IntervalMath.TotalMinutes(scheduled);
+        long coveredMin = IntervalMath.TotalMinutes(covered);
+
+        // Rule 5: dark = scheduled - covered, floored at zero.
+        long darkMin = Math.Max(0, scheduledMin - coveredMin);
+
+        return (scheduledMin / 60.0, coveredMin / 60.0, darkMin / 60.0);
+    }
+}
+
+
+The tests catch the bug. With the original Calculate body in place, 7 of 9 tests fail. With the fix restored, all 9 pass. The working tree is clean and matches your commit 716f14a, so the broken version never touched git.
+
+Results against the original body
+
+┌───────────────────────────────────────────────────────────┬───────────────┬──────────────┬──────────────────────────────────┐
+│                           Test                            │   Expected    │    Actual    │           Rule broken            │
+├───────────────────────────────────────────────────────────┼───────────────┼──────────────┼──────────────────────────────────┤
+│ Rule3_OverlappingShifts_UnionNotSum                       │ 12.00         │ 16.00        │ 3, raw sum instead of union      │
+├───────────────────────────────────────────────────────────┼───────────────┼──────────────┼──────────────────────────────────┤
+│ Rule2_RemovedShiftInInput_ContributesZero                 │ 0.00          │ 8.00         │ 2, removed shift counted         │
+├───────────────────────────────────────────────────────────┼───────────────┼──────────────┼──────────────────────────────────┤
+│ Rule6_ShiftCrossingWindowStart_ClippedToFour              │ 4.00          │ 0.00         │ 6, straddling shift dropped      │
+├───────────────────────────────────────────────────────────┼───────────────┼──────────────┼──────────────────────────────────┤
+│ Rule4_DuplicateCoverageRows_CountedOnce                   │ 4.00          │ 8.00         │ 4, duplicate coverage doubled    │
+├───────────────────────────────────────────────────────────┼───────────────┼──────────────┼──────────────────────────────────┤
+│ Rule4_CoverageOutsideShift_ClippedToShift                 │ 1.00          │ 2.00         │ 4, coverage not clipped to shift │
+├───────────────────────────────────────────────────────────┼───────────────┼──────────────┼──────────────────────────────────┤
+│ Rule5_CoverageLargerThanScheduled_DarkIsZeroNeverNegative │ 2.00 covered  │ 8.00 covered │ 4 then 5, dark would go to −6    │
+├───────────────────────────────────────────────────────────┼───────────────┼──────────────┼──────────────────────────────────┤
+│ Golden_FullFixture_PerLocationAndTotal                    │ Wichita 20.00 │ 32.00        │ first assert, see table below    │
+└───────────────────────────────────────────────────────────┴───────────────┴──────────────┴──────────────────────────────────┘
+
+The golden test output with the original body reproduces the numbers I calculated by hand for the current code earlier:
+
+Location     Scheduled   Covered      Dark
+Wichita          32.00     14.00     18.00
+Memphis           4.00      2.00      2.00
+Total            36.00     16.00     20.00
+
+Two tests pass on both versions, and that is expected
+
+- Rule1_TouchingIntervals: adjacent shifts 08–12 and 12–16 sum to 8.00 whether you union them or add them, so the old code gets the right answer by accident. The test guards the fix against a future "merge on touch" regression, not the original bug.
+- Rule7_MinutePrecision: TotalHours on a single shift already returned 0.75. The test guards the long-minutes conversion in the fix.
+
+Note on the Rule5 test. It fails on the covered assertion before reaching the dark assertion, because xunit stops at the first failed assert. The original body would have returned dark of −6.00 for that case. If you want the negative value to appear explicitly in the failure output, I can split the dark check into its own test.
+
+Restore verified. The restored file is byte-identical to the backup I took before the swap, and git status shows no modified or untracked files, so the tree matches your commit.
+
+✻ Baked for 35s · done 10:12 PM
+
+❯ you didnt write this code. review src/WeeklyKpi and tests/ like a senior reviewer that doesnt trust it. only findings, file:line, ordered by severity,
+  dont fix anything:
+  - off by one in [Start,End) at interval and window boundaries
+  - any double acumulated before the final conversion
+  - multiple enumeration of the IEnumerable parameters
+  - Location comparison vs SQL Server default collation (case insensitive)
+  - null or empty inputs
+  - a coverage row with no matching shift
+  - what breaks in a week with DST fall back if the timestamps are local
+  - any test that would still pass if we revert the fix
+    for each one tell me: fix now or document as known limitation, and why.
+
+I'll read both files with line numbers and review them against each item on the list.
+
+  Read 2 files
+
+Findings ordered by severity. Nothing was changed.
+
+1. Location match is ordinal and case-sensitive, SQL Server's default collation is not. src/WeeklyKpi/WeeklyKpi.cs:17 and :25. SQL_Latin1_General_CP1_CI_AS treats wichita, Wichita and Wichita  (trailing space, ANSI padding) as equal. The scheduling screen filters in SQL and sees all of them. This method silently drops them, so scheduled and dark are undercounted and the report can still disagree with the screen after this fix ships. The original code had the same comparison, so this is not a regression, but it is the most likely remaining cause of a mismatch. Fix now: one line to string.Equals(a, b, StringComparison.OrdinalIgnoreCase) plus Trim, and run SELECT DISTINCT Location in production first to confirm whether mixed casing exists. Accent-insensitivity cannot be matched exactly in C#, document that remainder.
+
+2. Null shifts or coverage throws from inside LINQ. src/WeeklyKpi/WeeklyKpi.cs:17 and :25. The exception is ArgumentNullException with parameter name source, which tells the Web Forms caller nothing. location null is safe and returns zeros. Fix now: two guard clauses at the top of Calculate. Cheap, no behaviour change for valid input.
+
+3. from >= to returns (0, 0, 0) silently. src/WeeklyKpi/WeeklyKpi.cs:47-49. Every Clip returns null, so a caller that swaps the arguments gets a clean-looking report of zero dark hours. Fix now: throw ArgumentException. A wrong window should fail loudly in a payroll-adjacent report.
+
+4. DST fall back is wrong by one hour if timestamps are local wall-clock. src/WeeklyKpi/WeeklyKpi.cs:91. All arithmetic is naive DateTime subtraction. On 2026-11-01 a 22:00 to 06:00 shift is 9 real hours and computes as 8. On 2027-03-14 a 7-hour shift computes as 8. Covered carries the same error, so dark mostly cancels, except when coverage ends inside the repeated 01:00 hour, which the data cannot even represent unambiguously. DateTime.Kind is also ignored by comparison, so a mix of Utc and Local kinds would compare raw ticks without complaint. Document as known limitation: rule 6 says ignore DST for calculation, the real fix is storing DATETIMEOFFSET or UTC, which is a schema change outside this patch. Open a ticket with those two dates.
+
+5. Sub-minute timestamps truncate, and the policy is undocumented. src/WeeklyKpi/WeeklyKpi.cs:92. DATETIME2 can carry seconds. An interval of 59 minutes 59 seconds counts as 59. Truncation happens once on the total ticks, not per interval, which is the better choice, but nobody has decided truncate versus round. Document as known limitation and get the business to pick. The fixture has no seconds, so nothing changes today.
+
+6. Test gaps that would let a regression through. tests/WeeklyKpi.Tests/WeeklyKpiTests.cs. Fix now, tests only:
+
+- No test for a shift ending exactly at from or starting exactly at to. If Clip on line 49 were changed to s <= e, nothing fails. These are the only rule 1 boundary tests that discriminate.
+- No test for coverage booked against a shift that was later removed. Under the original code that coverage counts as 8 hours covered. This is a real production scenario and a strong discriminating test.
+- No test for coverage spanning two separated shifts, which the Intersect sweep at line 72-85 claims to handle.
+- No test for coverage entirely outside any shift. Row 107 only covers the partial case.
+- Rule7_MinutePrecision at line 98 passes on the original code. Make it discriminate with two overlapping sub-hour shifts, for example 08:00 to 08:45 plus 08:30 to 09:10, expected 1.17 not 1.42.
+- Rule5 at line 79-81 asserts covered before dark, so on revert the failure never shows the negative number. Assert dark first or split the test.
+
+7. Rule1_TouchingIntervals can never discriminate. tests/WeeklyKpi.Tests/WeeklyKpiTests.cs:86. Merging or not merging touching intervals never changes a total, so no black-box test through Calculate can tell the two apart. Keep it as a guard and document that it is a structural test, not a bug test. Making it discriminate needs InternalsVisibleTo and a direct assertion on the Merge output count.
+
+8. Per-location hours are summed as doubles in the caller. tests/WeeklyKpi.Tests/WeeklyKpiTests.cs:131-133 shows the pattern the report will use. Each value is a multiple of 1/60 and summing them can produce artifacts like 12.999999. The 2-decimal display absorbs it. Document: the API returns doubles so the caller cannot sum minutes, and the display rounding is the agreed guard.
+
+9. Golden test stops at the first failed assert. tests/WeeklyKpi.Tests/WeeklyKpiTests.cs:140-150. Nine asserts in one Fact. A Memphis-only regression is still caught, but the output only shows Wichita. xunit 2.9 has no Assert.Multiple. Document, or convert to a Theory with one InlineData row per location. Low.
+
+10. DateTime.Parse without a culture. tests/WeeklyKpi.Tests/WeeklyKpiTests.cs:10. ISO 8601 input parses the same in every culture, so this is safe today. Document. Low.
+
+11. Assert.Single(shifts) is tautological. tests/WeeklyKpi.Tests/WeeklyKpiTests.cs:36. It asserts the test's own array and proves nothing about auditability. Document or delete. Low.
+
+Checked and clean, with the lines I verified:
+
+- Off by one at boundaries: Clip at 47-49 uses strict s < e, so a shift ending at from or starting at to yields null and a shift ending exactly at to is kept whole. Merge at 58 merges only on strict overlap. Intersect at 81 drops touching pairs. Intersect at 82 advances the list with the smaller End, and on equal ends it wastes one iteration but never skips an overlap, because merged lists cannot overlap the next interval. I traced [08,12)+[12,16) against [10,14) and one coverage row across [08,12) and [14,18) by hand and both produce the right pieces.
+- Double accumulated before conversion: none. Ticks are summed as long at line 91, divided as integers at 92, and converted to double once at 38.
+- Multiple enumeration: none. Each parameter is enumerated exactly once, at 17 and 25, and OrderBy inside Merge buffers before the sweep.
+- Coverage with no matching shift: dropped by Intersect. Coverage for a removed shift is also dropped because the removed shift never enters scheduled. Correct per rule 4, just untested, see item 6.
+
+✻ Worked for 1m 54s · done 10:16 PM
